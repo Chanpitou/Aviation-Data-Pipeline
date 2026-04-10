@@ -1,2 +1,6 @@
 .data_venv/
 .env
+checkpoints/
+pg_data/
+pg_meta_data/
+pg_stream_data/

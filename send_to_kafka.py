@@ -1,13 +1,18 @@
 from confluent_kafka import Producer
+from dotenv import load_dotenv
+import os
 import requests
 import logging
 import json
 import time
 
+load_dotenv()
 logging.basicConfig(format='%(asctime)s: %(levelname)s - %(message)s', level=logging.INFO)
 
 def fetch_aviation_api_data():
     url = "https://opensky-network.org/api/states/all"
+    USERNAME=os.getenv("USERNAME")
+    PASSWORD=os.getenv("PASSWORD")
     try:
         response = requests.get(url)
         response.raise_for_status()
@@ -49,8 +54,11 @@ def produce_aviation_data():
                         value = json.dumps(flight_event).encode('utf-8')
                         producer.produce(topic='aviation_raw', value=value, callback=delivery_report)
 
-                logging.info(f"Produced {len(data['states'])} flight events. Sleeping...")
-                time.sleep(15)
+                    logging.info(f"Produced {len(data['states'])} flight events. Sleeping...")
+                    time.sleep(20)
+                else:
+                    logging.warning("No data received or rate limit hit.")
+
     except KeyboardInterrupt:
         logging.error("Producer is stopped by user")
 

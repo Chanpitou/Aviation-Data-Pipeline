@@ -10,9 +10,11 @@ load_dotenv()
 
 # Create a spark session object
 spark = (SparkSession.builder
-         .appName("AviationStreaming")
-         .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.1")
-         .getOrCreate())
+    .appName("AviationStreaming")
+    .config("spark.jars.packages",
+            "org.apache.spark:spark-sql-kafka-0-10_2.13:3.5.5," 
+            "org.postgresql:postgresql:42.7.2")
+    .getOrCreate())
 
 # Specifying data types schema for incoming streaming data
 aviation_schema = StructType([
@@ -27,6 +29,19 @@ aviation_schema = StructType([
     StructField("timestamp", LongType(), True)
 ])
 
+
+def write_to_postgres(df, epoch_id):
+    # Using the separate instance details
+    df.write \
+        .mode("append") \
+        .format("jdbc") \
+        .option("url", "jdbc:postgresql://localhost:5433/aviation_db") \
+        .option("dbtable", "raw_flight_logs") \
+        .option("user", "aviation_user") \
+        .option("password", os.getenv("STREAM_POSTGRES_PASSWORD")) \
+        .option("driver", "org.postgresql.Driver") \
+        .save()
+
 try:
     logging.info("Receiving incoming flight events...")
     raw_df = spark.readStream \
@@ -34,6 +49,7 @@ try:
         .option("kafka.bootstrap.servers", "localhost:9092") \
         .option("subscribe", "aviation_raw") \
         .option("startingOffsets", "latest") \
+        .option("failOnDataLoss", "false") \
         .load()
 
     logging.info("Cleaning/Transforming incoming flight events...")
@@ -48,31 +64,30 @@ try:
         .withColumn("velocity", coalesce(col("velocity"), lit(0.0))) \
         .withColumn("altitude", coalesce(col("altitude"), lit(0.0)))
 
-
-    snowflake_config = {
-        "URL": os.getenv("SNOWFLAKE_URL"),
-        "USER": os.getenv("SNOWFLAKE_USER"),
-        "PASSWORD": os.getenv("SNOWFLAKE_PASSWORD"),
-        "WAREHOUSE": os.getenv("SNOWFLAKE_WAREHOUSE"),
-        "DATABASE": os.getenv("SNOWFLAKE_DATABASE"),
-        "SCHEMA": os.getenv("SNOWFLAKE_SCHEMA"),
-        "ROLE": os.getenv("SNOWFLAKE_ROLE")
-    }
-
-    query = final_df.writeStream \
-        .outputMode("append") \
-        .format("console") \
-        .option("truncate", "false") \
-        .start()
+    # snowflake_config = {
+    #     "sfURL": os.getenv("SNOWFLAKE_URL"),
+    #     "sfUser": os.getenv("SNOWFLAKE_USER"),
+    #     "sfDatabase": os.getenv("SNOWFLAKE_DATABASE"),
+    #     "sfSchema": os.getenv("SNOWFLAKE_SCHEMA"),
+    #     "sfWarehouse": os.getenv("SNOWFLAKE_WAREHOUSE"),
+    #     "sfRole": os.getenv("SNOWFLAKE_ROLE"),
+    #     "pem_private_key": os.getenv("RSA_KEY"),
+    #     "sfauthenticator": "snowflake_jwt"
+    # }
 
     # query = final_df.writeStream \
-    #     .format("snowflake") \
-    #     .options(**snowflake_config) \
-    #     .option("dbtable", "RAW_FLIGHT_LOGS") \
-    #     .option("checkpointLocation", "/path/to/checkpoint/dir") \
     #     .outputMode("append") \
+    #     .format("console") \
+    #     .option("truncate", "false") \
     #     .start()
 
+    # Start the stream
+    query = final_df.writeStream \
+        .foreachBatch(write_to_postgres) \
+        .option("checkpointLocation", "checkpoints/aviation_postgres_v3") \
+        .start()
+
     query.awaitTermination()
+
 except Exception as e:
     logging.error(e)
