@@ -1,6 +1,7 @@
 # Real-Time Aviation Data Pipeline
 
 A distributed data pipeline built to demonstrate the integration of **Apache Kafka** and **PySpark Structured Streaming**. This project focuses on the low-latency ingestion of high-velocity aviation state vectors, transforming raw API data into structured, actionable insights.
+![Metabase Dashboard Preview](image/Real_Time_Aviation_Monitor.png)
 
 ## Core Pipeline Logic
 The project is designed as a linear, high-throughput stream:
