@@ -11,8 +11,6 @@ logging.basicConfig(format='%(asctime)s: %(levelname)s - %(message)s', level=log
 
 def fetch_aviation_api_data():
     url = "https://opensky-network.org/api/states/all"
-    USERNAME=os.getenv("USERNAME")
-    PASSWORD=os.getenv("PASSWORD")
     try:
         response = requests.get(url)
         response.raise_for_status()
@@ -36,7 +34,7 @@ def produce_aviation_data():
             while True:
                 data = fetch_aviation_api_data()
 
-                if data and data['states']:
+                if data and data.get('states'):
                     for state in data['states']:
                         flight_event = {
                             "icao24": state[0],
@@ -53,9 +51,9 @@ def produce_aviation_data():
                         # Producing aviation to aviation_raw topic for each flight
                         value = json.dumps(flight_event).encode('utf-8')
                         producer.produce(topic='aviation_raw', value=value, callback=delivery_report)
-
+                    producer.poll(20.0)
                     logging.info(f"Produced {len(data['states'])} flight events. Sleeping...")
-                    time.sleep(20)
+                    time.sleep(15)
                 else:
                     logging.warning("No data received or rate limit hit.")
 

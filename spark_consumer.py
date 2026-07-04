@@ -11,8 +11,9 @@ load_dotenv()
 # Create a spark session object
 spark = (SparkSession.builder
     .appName("AviationStreaming")
+    .master("spark://spark-master:7077")
     .config("spark.jars.packages",
-            "org.apache.spark:spark-sql-kafka-0-10_2.13:3.5.5," 
+            "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,"
             "org.postgresql:postgresql:42.7.2")
     .getOrCreate())
 
@@ -35,24 +36,14 @@ def write_to_postgres(df, epoch_id):
     df.write \
         .mode("append") \
         .format("jdbc") \
-        .option("url", "jdbc:postgresql://localhost:5433/aviation_db") \
+        .option("url", "jdbc:postgresql://postgres-stream:5433/aviation_db") \
         .option("dbtable", "raw_flight_logs") \
         .option("user", "aviation_user") \
         .option("password", os.getenv("STREAM_POSTGRES_PASSWORD")) \
         .option("driver", "org.postgresql.Driver") \
         .save()
 
-try:
-    logging.info("Receiving incoming flight events...")
-    raw_df = spark.readStream \
-        .format("kafka") \
-        .option("kafka.bootstrap.servers", "localhost:9092") \
-        .option("subscribe", "aviation_raw") \
-        .option("startingOffsets", "latest") \
-        .option("failOnDataLoss", "false") \
-        .load()
-
-    logging.info("Cleaning/Transforming incoming flight events...")
+def stream_cleaning(raw_df):
     # Convert incoming data as string and apply data type schema
     parsed_df = raw_df.selectExpr("CAST(value AS STRING)").select(from_json(col("value"),aviation_schema).alias("data")).select("data.*")
 
@@ -60,9 +51,23 @@ try:
     cleaned_df = parsed_df.filter(col("latitude").isNotNull() & col("longitude").isNotNull())
 
     # Handle/Transform columns: callsign, velocity, baro-altitude
-    final_df = cleaned_df.withColumn("callsign", coalesce(col("callsign"), lit("UNKNOWN"))) \
+    result_df = cleaned_df.withColumn("callsign", coalesce(col("callsign"), lit("UNKNOWN"))) \
         .withColumn("velocity", coalesce(col("velocity"), lit(0.0))) \
         .withColumn("altitude", coalesce(col("altitude"), lit(0.0)))
+    return result_df
+
+try:
+    logging.info("Receiving incoming flight events...")
+    raw_df = spark.readStream \
+        .format("kafka") \
+        .option("kafka.bootstrap.servers", "kafka:9092") \
+        .option("subscribe", "aviation_raw") \
+        .option("startingOffsets", "earliest") \
+        .option("failOnDataLoss", "false") \
+        .load()
+
+    logging.info("Cleaning/Transforming incoming flight events...")
+    final_df = stream_cleaning(raw_df)
 
     # snowflake_config = {
     #     "sfURL": os.getenv("SNOWFLAKE_URL"),
@@ -84,7 +89,7 @@ try:
     # Start the stream
     query = final_df.writeStream \
         .foreachBatch(write_to_postgres) \
-        .option("checkpointLocation", "checkpoints/aviation_postgres_v3") \
+        .option("checkpointLocation", "/opt/spark-checkpoints/aviation_postgres_v3") \
         .start()
 
     query.awaitTermination()
