@@ -27,7 +27,7 @@ def delivery_report(err, msg):
 def produce_aviation_data():
     try:
         producer_config = {
-            "bootstrap.servers": "localhost:9092",
+            "bootstrap.servers": "localhost:29092",
         }
         logging.info("Fetching aviation data")
         with Producer(producer_config) as producer:

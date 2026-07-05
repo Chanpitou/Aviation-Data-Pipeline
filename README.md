@@ -1,7 +1,7 @@
 # Real-Time Aviation Data Pipeline
 
 A distributed data pipeline built to demonstrate the integration of **Apache Kafka** and **PySpark Structured Streaming**. This project focuses on the low-latency ingestion of high-velocity aviation state vectors, transforming raw API data into structured, actionable insights.
-![Metabase Dashboard Preview](image/Real_Time_Aviation_Monitor.png)
+![Metabase Dashboard Preview](image/Flight_Aviation_img.png)
 
 ## Core Pipeline Logic
 The project is designed as a linear, high-throughput stream:
@@ -13,47 +13,66 @@ The project is designed as a linear, high-throughput stream:
 
 ## Tech Stack
 * **Language:** Python
-* **Stream Ingestion:** confluent-kafka (Docker containerized)
+* **Message Broker:** Apache Kafka (KRaft mode, Docker containerized)
+* **Stream Processing:** Apache Spark / PySpark Structured Streaming (Docker containerized)
 * **Databases:** PostgreSQL (Docker containerized)
 * **Visualization:** Metabase (Docker containerized)
-* **Tools:** Requests, Docker, python-dotenv, Git/GitHub
+* **Libraries:** confluent-kafka, requests, python-dotenv
+* **Tools:** Docker, Git/GitHub
 
 ## Engineering Highlights
 * **Atomic Event Modeling:** Rather than processing bulk JSON payloads, I implemented a per-flight event model. This allows the Spark engine to distribute the workload effectively across its executors.
 * **Schema Enforcement:** Defined explicit `StructType` schemas to ensure data integrity. This prevents "poison pill" messages or malformed JSON from crashing the streaming query.
-* **Containerized Networking:** Managed a complex Docker network setup where the host-side Spark engine communicates with containerized Kafka and Postgres instances across mapped ports.
+* **Containerized Spark Cluster:** Spark master, worker, and the streaming consumer all run as Docker services on the same network as Kafka and Postgres, so the whole pipeline comes up with a single `docker compose up`.
+* **Dual-Listener Kafka Networking:** Kafka is configured with separate internal (`kafka:9092`) and external (`localhost:29092`) listeners, so the containerized consumer and the host-side producer can each resolve the broker correctly without one breaking the other.
+
+## Project Structure
+```
+src/
+  producer/send_to_kafka.py   # polls OpenSky API, publishes flight events to Kafka (runs on host)
+  consumer/spark_consumer.py  # Spark Structured Streaming job, Kafka -> Postgres (runs in Docker)
+sql/                           # Metabase analysis queries, version-controlled
+docker-compose.yml             # Kafka, Spark cluster, Postgres, Metabase services
+Dockerfile.spark-master
+Dockerfile.spark-worker
+Dockerfile.spark-submit         # bakes in and runs src/consumer/spark_consumer.py
+requirements.txt                # producer dependencies (installed on host)
+```
 
 ## Deployment
 ### Prerequisites
 * Docker Desktop
-* PySpark installed and configured locally
+* Python 3.x (only needed to run the producer, which polls the API from your host)
 
-### 1.Clone the repository:
+### 1. Clone the repository:
 ```bash
 git clone https://github.com/Chanpitou/Aviation-Data-Pipeline
 cd Aviation-Data-Pipeline
 ```
-### 2. Spin up Infrastructure
+### 2. Environment Setup
+create and setup `.env` and fill in your own values:
 ```bash
-docker-compose up -d
+MB_POSTGRES_PASSWORD=yourpassword
+STREAM_POSTGRES_PASSWORD=yourpassword
 ```
-### 3. Environment Setup
-Create a .env file with the following:
+### 3. Spin up Infrastructure
+Builds and starts Kafka, the Spark cluster (master/worker/submit), Postgres, and Metabase. The consumer (`src/consumer/spark_consumer.py`) runs automatically inside the `spark-submit` container — no separate step needed.
 ```bash
-STREAM_POSTGRES_PASSWORD=your_password
-MB_POSTGRES_PASSWORD=your_password
+docker compose up -d --build
 ```
 ### 4. Run Producer
+The producer runs on the host and publishes to Kafka's external listener (`localhost:29092`).
 ```bash
-python send_to_kafka.py
+pip install -r requirements.txt
+python src/producer/send_to_kafka.py
 ```
-### 5. Run PySpark Consumer
+### 5. Access/Customize Visualization (Metabase)
+Navigate to `localhost:3000` to access the Metabase dashboard. Ready-to-use analysis queries live in [`sql/`](sql/).
+
+### Rebuilding after changes
+`spark_consumer.py` is baked into the `spark-submit` image at build time, so after editing it you need to rebuild that service specifically:
 ```bash
-spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.13:3.5.5,org.postgresql:postgresql:42.7.2 spark_consumer.py
-```
-### 6. Access/Customized Visualization (Metabase)
-```bash
-Navigate to localhost:3000 to access the Metabase dashboard
+docker compose up -d --build spark-submit
 ```
 
 ## Results
@@ -61,6 +80,7 @@ The final result is a live-updating dashboard that monitors 10,000+ simultaneous
 
 * **Geospatial Map:** Real-time location tracking.
 * **Fleet KPI:** Unique aircraft count in the current stream window.
+* **Ground Status:** Live count of on-ground vs. in-air aircraft.
 * **State Analysis:** Distribution of altitudes and origin countries.
 
 ## Future Enhancements

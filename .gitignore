@@ -1,6 +1,8 @@
 .data_venv/
 .env
+.idea/
 checkpoints/
 pg_data/
 pg_meta_data/
 pg_stream_data/
+.claude/

@@ -17,7 +17,7 @@ spark = (SparkSession.builder
             "org.postgresql:postgresql:42.7.2")
     .getOrCreate())
 
-# Specifying data types schema for incoming streaming data
+# Specifying explicit schema for incoming streaming data
 aviation_schema = StructType([
     StructField("icao24", StringType(), True),
     StructField("callsign", StringType(), True),
@@ -36,7 +36,7 @@ def write_to_postgres(df, epoch_id):
     df.write \
         .mode("append") \
         .format("jdbc") \
-        .option("url", "jdbc:postgresql://postgres-stream:5433/aviation_db") \
+        .option("url", "jdbc:postgresql://postgres-stream:5432/aviation_db") \
         .option("dbtable", "raw_flight_logs") \
         .option("user", "aviation_user") \
         .option("password", os.getenv("STREAM_POSTGRES_PASSWORD")) \

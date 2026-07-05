@@ -6,7 +6,7 @@ services:
     image: confluentinc/cp-kafka:7.8.3
     container_name: kafka
     ports:
-      - "9092:9092"
+      - "29092:29092"
 
     environment:
       KAFKA_KRAFT_MODE: 'true'
@@ -18,11 +18,13 @@ services:
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,EXTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
 
-      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
 
     volumes:
       - kafka_kraft:/var/lib/kafka/data
@@ -31,10 +33,10 @@ services:
 
   # --- Apache Spark Service ---
   spark-master:
-    image: apache/spark:3.5.1
+    build:
+      context: .
+      dockerfile: Dockerfile.spark-master
     container_name: spark-master
-    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
-
     environment:
       - SPARK_MODE=master
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
@@ -50,9 +52,10 @@ services:
       - spark-checkpoints:/opt/spark-checkpoints
 
   spark-worker:
-    image: apache/spark:3.5.1
+    build:
+      context: .
+      dockerfile: Dockerfile.spark-worker
     container_name: spark-worker
-    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
     environment:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077
@@ -68,6 +71,24 @@ services:
       - metanet1
     volumes:
       - spark-checkpoints:/opt/spark-checkpoints
+
+  spark-submit:
+    build:
+      context: .
+      dockerfile: Dockerfile.spark-submit
+    container_name: spark-submit
+    depends_on:
+      - spark-master
+      - spark-worker
+      - kafka
+      - postgres-stream
+    environment:
+      - STREAM_POSTGRES_PASSWORD=${STREAM_POSTGRES_PASSWORD}
+    networks:
+      - metanet1
+    volumes:
+      - spark-checkpoints:/opt/spark-checkpoints
+    restart: on-failure
 
   # --- Metabase BI Service ---
   metabase:
